@@ -7,7 +7,7 @@ final class SBCDecoder: @unchecked Sendable {
     private var samples = [Int16](repeating: 0, count: 256)
 
     init() throws {
-        guard let decoder = switch_sbc_create() else { throw PlayerError("无法初始化 SBC 解码器。") }
+        guard let decoder = switch_sbc_create() else { throw PlayerError(AppMessage("error.sbc_init")) }
         self.decoder = decoder
     }
 

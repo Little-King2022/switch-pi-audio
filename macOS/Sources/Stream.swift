@@ -3,10 +3,10 @@ import Foundation
 enum InputBackend: String, CaseIterable {
     case pulse, bluez
 
-    var label: String {
+    var labelKey: String {
         switch self {
-        case .pulse: "PulseAudio"
-        case .bluez: "BlueZ 直读"
+        case .pulse: "backend.pulse"
+        case .bluez: "backend.bluez"
         }
     }
 }
@@ -31,7 +31,7 @@ final class SSHStream: @unchecked Sendable {
     private static func sshArguments(host: String, command: String) throws -> [String] {
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard host.range(of: #"^[A-Za-z0-9][A-Za-z0-9._@-]{0,125}$"#, options: .regularExpression) != nil else {
-            throw PlayerError("请输入 SSH 别名，例如 pi-audio，或 user@host。")
+            throw PlayerError(AppMessage("error.ssh_host"))
         }
         return ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=6",
                 "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2", host, command]
@@ -51,7 +51,7 @@ final class SSHStream: @unchecked Sendable {
             process.waitUntilExit()
             guard process.terminationStatus == 0 else {
                 let message = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-                throw PlayerError(message.isEmpty ? "切换树莓派后端失败。" : message)
+                throw PlayerError(message.isEmpty ? AppMessage("error.backend") : AppMessage(verbatim: message))
             }
         }.value
     }
@@ -61,7 +61,7 @@ final class SSHStream: @unchecked Sendable {
         let source = source.trimmingCharacters(in: .whitespacesAndNewlines)
         guard backend != .pulse || source.isEmpty ||
             source.range(of: #"^[A-Za-z0-9_.-]{1,160}$"#, options: .regularExpression) != nil else {
-            throw PlayerError("输入名称可留空，或填写 PulseAudio 的完整输入名称。")
+            throw PlayerError(AppMessage("error.source"))
         }
 
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
@@ -125,7 +125,7 @@ final class SSHStream: @unchecked Sendable {
       source=$(printf '%s\n' "$sources" | awk '$2 ~ /^bluez_(source|input)[.]/ {count++; name=$2} END {if (count==1) print name}')
     fi
     if [ -z "$source" ]; then
-      printf '%s\n' '未找到唯一可用的蓝牙输入。请在 Switch 上连接 Switch-Pi-Audio，或在 App 里指定输入。' >&2
+      printf '%s\n' 'SWITCH_PI_AUDIO_NO_UNIQUE_BLUETOOTH_SOURCE' >&2
       exit 3
     fi
     exec parec --raw --device="$source" --format=s16le --rate=48000 --channels=2
@@ -136,13 +136,13 @@ final class SSHStream: @unchecked Sendable {
 final class ReceiverModel: ObservableObject {
     enum Phase: Equatable {
         case disconnected, connecting, buffering, playing, error
-        var label: String {
+        var labelKey: String {
             switch self {
-            case .disconnected: "未连接"
-            case .connecting: "正在连接"
-            case .buffering: "正在缓冲"
-            case .playing: "正在播放"
-            case .error: "连接中断"
+            case .disconnected: "phase.disconnected"
+            case .connecting: "phase.connecting"
+            case .buffering: "phase.buffering"
+            case .playing: "phase.playing"
+            case .error: "phase.error"
             }
         }
     }
@@ -152,9 +152,9 @@ final class ReceiverModel: ObservableObject {
     @Published private(set) var qualityHistory = QualityHistory()
     @Published private(set) var monitoredBuffer: Int?
     @Published private(set) var monitoredBackend: InputBackend?
-    @Published private(set) var message = ""
+    @Published private(set) var message: AppMessage?
     @Published private(set) var switchingBackend = false
-    @Published private(set) var backendMessage = ""
+    @Published private(set) var backendMessage: AppMessage?
     @Published private(set) var outputs = OutputDevice.available()
     @Published var host: String {
         didSet { UserDefaults.standard.set(host, forKey: "sshHost") }
@@ -165,7 +165,7 @@ final class ReceiverModel: ObservableObject {
     @Published var backend: InputBackend {
         didSet {
             UserDefaults.standard.set(backend.rawValue, forKey: "inputBackend")
-            backendMessage = ""
+            backendMessage = nil
         }
     }
     @Published var outputID: String {
@@ -227,21 +227,21 @@ final class ReceiverModel: ObservableObject {
     func changeBackend() async {
         guard !active, !switchingBackend else { return }
         switchingBackend = true
-        backendMessage = ""
+        backendMessage = nil
         defer { switchingBackend = false }
         do {
             try await SSHStream.changeBackend(host: host, backend: backend)
-            backendMessage = "树莓派已启用\(backend.label)。请确认 Switch 已连接，再点「连接」。"
+            backendMessage = AppMessage("connection.backend_enabled", .label(backend.labelKey))
         } catch {
-            backendMessage = error.localizedDescription
+            backendMessage = AppMessage(error: error)
         }
     }
 
     func connect() {
         if active || switchingBackend { return }
         refreshOutputs()
-        guard let selectedOutput else { fail("找不到可用的音频输出。"); return }
-        message = ""
+        guard let selectedOutput else { fail(AppMessage("error.no_output")); return }
+        message = nil
         metrics = nil
         qualityHistory = QualityHistory()
         monitoredBuffer = bufferMs
@@ -262,7 +262,12 @@ final class ReceiverModel: ObservableObject {
                 ended: { [weak self] exitCode, stderr in
                     Task { @MainActor [weak self] in
                         guard let self, self.generation == token else { return }
-                        self.fail(stderr.isEmpty ? "SSH 音频流已结束（\(exitCode)）。" : stderr)
+                        let marker = "SWITCH_PI_AUDIO_NO_UNIQUE_BLUETOOTH_SOURCE"
+                        if exitCode == 3 && stderr.split(whereSeparator: \.isNewline).contains(Substring(marker)) {
+                            self.fail(AppMessage("error.bluetooth_source"))
+                        } else {
+                            self.fail(stderr.isEmpty ? AppMessage("error.ssh_exit", .integer(Int64(exitCode))) : AppMessage(verbatim: stderr))
+                        }
                     }
                 })
             let start = ProcessInfo.processInfo.systemUptime
@@ -283,14 +288,14 @@ final class ReceiverModel: ObservableObject {
                     if status.started { self.phase = status.rebuffering ? .buffering : .playing }
                     else if status.receivedFrames > 0 { self.phase = .buffering }
                     if !status.started && now - start > 14 {
-                        self.fail("SSH 已启动，但暂时没有音频数据。请确认 Switch 已连接并正在播放。")
+                        self.fail(AppMessage("error.no_data"))
                         return
                     }
                     try? await Task.sleep(nanoseconds: 250_000_000)
                 }
             }
         } catch {
-            fail(error.localizedDescription)
+            fail(AppMessage(error: error))
         }
     }
 
@@ -303,11 +308,11 @@ final class ReceiverModel: ObservableObject {
         player?.close()
         player = nil
         metrics = nil
-        message = ""
+        message = nil
         phase = .disconnected
     }
 
-    private func fail(_ reason: String) {
+    private func fail(_ reason: AppMessage) {
         disconnect()
         message = reason
         phase = .error

@@ -31,14 +31,14 @@ private final class MarkerMic: @unchecked Sendable {
         let create = AudioQueueNewInputWithDispatchQueue(&q, &format, 0, callbacks) { [weak self] queue, buffer, stamp, _, _ in
             self?.received(queue, buffer, stamp.pointee)
         }
-        guard create == noErr, let q else { throw PlayerError("无法启动测量用的麦克风（\(create)）。") }
+        guard create == noErr, let q else { throw PlayerError(AppMessage("error.mic_start", .integer(Int64(create)))) }
         recording = q
         do {
             try verify(setQueueDevice(q, uid: "BuiltInMicrophoneDevice"))
             for _ in 0..<4 {
                 var buffer: AudioQueueBufferRef?
                 try verify(AudioQueueAllocateBuffer(q, UInt32(length * 4), &buffer))
-                guard let buffer else { throw PlayerError("无法分配麦克风缓冲。") }
+                guard let buffer else { throw PlayerError(AppMessage("error.mic_buffer")) }
                 try verify(AudioQueueEnqueueBuffer(q, buffer, 0, nil))
             }
             try verify(AudioQueueStart(q, nil))
@@ -49,7 +49,7 @@ private final class MarkerMic: @unchecked Sendable {
     }
 
     private func verify(_ status: OSStatus) throws {
-        if status != noErr { throw PlayerError("内置麦克风不可用（\(status)）。") }
+        if status != noErr { throw PlayerError(AppMessage("error.mic_status", .integer(Int64(status)))) }
     }
 
     private func received(_ q: AudioQueueRef, _ buffer: AudioQueueBufferRef, _ time: AudioTimeStamp) {
@@ -118,19 +118,19 @@ private struct BenchmarkTest {
     let block: Int
     static let markers: Set<Int> = [42, 82, 122, 162, 202]
 
-    func run(progress: @escaping @Sendable (String) -> Void) async throws -> BenchmarkResult {
+    func run(progress: @escaping @Sendable (AppMessage) -> Void) async throws -> BenchmarkResult {
         let ffmpeg = try findFFmpeg()
         let index = try outputIndex(ffmpeg)
         let mic = try MarkerMic()
         defer { mic.close() }
         // Let the microphone clock settle before starting the first output.
         try await Task.sleep(nanoseconds: 300_000_000)
-        progress("测量现有 FFmpeg 播放…")
+        progress(AppMessage("benchmark.ffmpeg"))
         let old = try await measureFFmpeg(ffmpeg: ffmpeg, index: index, mic: mic)
-        progress("测量 Core Audio 播放…")
+        progress(AppMessage("benchmark.coreaudio"))
         let new = try await measureNative(mic: mic)
         guard old.count >= 3, new.count >= 3 else {
-            throw PlayerError("未能收到足够的测量音（FFmpeg \(old.count)/5，Core Audio \(new.count)/5）。请调高 Mac 扬声器音量，保持周围安静再试。")
+            throw PlayerError(AppMessage("error.measure_pulses", .integer(Int64(old.count)), .integer(Int64(new.count))))
         }
         return BenchmarkResult(legacy: old, native: new)
     }
@@ -201,7 +201,7 @@ private struct BenchmarkTest {
         let path = ProcessInfo.processInfo.environment["PATH"] ?? ""
         let dirs = path.split(separator: ":").map(String.init) + ["/opt/homebrew/bin", "/usr/local/bin"]
         guard let candidate = dirs.map({ $0 + "/ffmpeg" }).first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
-            throw PlayerError("找不到 FFmpeg。播放功能可用，延迟对比需要原方案的 FFmpeg。")
+            throw PlayerError(AppMessage("error.ffmpeg_missing"))
         }
         return URL(fileURLWithPath: candidate)
     }
@@ -222,35 +222,35 @@ private struct BenchmarkTest {
                 return String(line[pair].dropFirst().dropLast())
             }
         }
-        throw PlayerError("FFmpeg 找不到相同的内置扬声器。")
+        throw PlayerError(AppMessage("error.ffmpeg_speaker"))
     }
 }
 
 @MainActor
 final class BenchmarkModel: ObservableObject {
     @Published var running = false
-    @Published var stage = ""
+    @Published var stage: AppMessage?
     @Published var result: BenchmarkResult?
-    @Published var failure = ""
+    @Published var failure: AppMessage?
     private var task: Task<Void, Never>?
     private var generation = UUID()
 
     func start(output: OutputDevice?, buffer: Int, block: Int) {
         guard !running else { return }
         guard let output, output.id == "BuiltInSpeakerDevice" else {
-            failure = "测量需要选择 MacBook 内置扬声器。"
+            failure = AppMessage("error.benchmark_output")
             return
         }
-        failure = ""
+        failure = nil
         result = nil
-        stage = "等待麦克风权限…"
+        stage = AppMessage("benchmark.waiting")
         running = true
         generation = UUID()
         let token = generation
         task = Task { [weak self] in
             guard await AVCaptureDevice.requestAccess(for: .audio) else {
                 if self?.generation == token {
-                    self?.failure = "系统尚未授权麦克风。可在「系统设置 → 隐私与安全性 → 麦克风」中授权后重试。"
+                    self?.failure = AppMessage("error.mic_permission")
                     self?.running = false
                 }
                 return
@@ -279,7 +279,7 @@ final class BenchmarkModel: ObservableObject {
                 }
             } catch {
                 if self?.generation == token && !(error is CancellationError) {
-                    self?.failure = error.localizedDescription
+                    self?.failure = AppMessage(error: error)
                     print("BENCHMARK_ERROR \(error.localizedDescription)")
                     fflush(stdout)
                 }
@@ -292,12 +292,13 @@ final class BenchmarkModel: ObservableObject {
         generation = UUID()
         task?.cancel()
         task = nil
-        stage = ""
+        stage = nil
         running = false
     }
 }
 
 struct BenchmarkView: View {
+    @Environment(\.appLanguage) private var language
     @ObservedObject var model: BenchmarkModel
     let output: OutputDevice?
     let buffer: Int
@@ -306,29 +307,29 @@ struct BenchmarkView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("延迟对比").font(.title2.bold())
-            Text("用内置扬声器播放短测试音，内置麦克风检测到达时间。测量覆盖 Mac 播放段，不包含 Switch、蓝牙或网络。不会保存录音。")
+            Text(language.text("benchmark.title")).font(.title2.bold())
+            Text(language.text("benchmark.description"))
                 .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(.secondary)
-            if model.running {
-                HStack { ProgressView().controlSize(.small); Text(model.stage) }
+            if model.running, let stage = model.stage {
+                HStack { ProgressView().controlSize(.small); Text(stage.text(in: language)) }
             }
             if let result = model.result {
                 Grid(alignment: .leading, horizontalSpacing: 26, verticalSpacing: 8) {
                     GridRow { Text("FFmpeg"); Text(String(format: "%.0f ms", result.oldMedian)).monospacedDigit() }
                     GridRow { Text("Core Audio"); Text(String(format: "%.0f ms", result.newMedian)).monospacedDigit() }
-                    GridRow { Text("差值"); Text(String(format: "%.0f ms", result.oldMedian - result.newMedian)).monospacedDigit() }
+                    GridRow { Text(language.text("benchmark.delta")); Text(String(format: "%.0f ms", result.oldMedian - result.newMedian)).monospacedDigit() }
                 }
-                Text("各路径用 5 个脉冲测试，取识别到的样本中位数。")
+                Text(language.text("benchmark.method"))
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if !model.failure.isEmpty {
-                Text(model.failure).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            if let failure = model.failure {
+                Text(failure.text(in: language)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
             HStack {
                 Spacer()
-                Button("关闭") { model.cancel(); dismiss() }
-                Button("开始测量") { model.start(output: output, buffer: buffer, block: block) }
+                Button(language.text("benchmark.close")) { model.cancel(); dismiss() }
+                Button(language.text("benchmark.start")) { model.start(output: output, buffer: buffer, block: block) }
                     .buttonStyle(.borderedProminent)
                     .disabled(model.running)
             }
