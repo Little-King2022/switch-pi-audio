@@ -3,9 +3,14 @@ import SwiftUI
 
 @main
 struct SwitchPiAudioApp: App {
+    @AppStorage(AppLanguagePreference.storageKey) private var languagePreference: AppLanguagePreference = .system
+
+    private var language: AppLanguage { languagePreference.resolve() }
+
     var body: some Scene {
-        Window("Switch 音频", id: "receiver") {
-            ReceiverView()
+        Window("Switch Pi Audio", id: "receiver") {
+            ReceiverView(languagePreference: $languagePreference)
+                .environment(\.appLanguage, language)
         }
         .defaultSize(width: 790, height: 748)
         .windowResizability(.contentMinSize)
@@ -19,6 +24,8 @@ private let mint = Color(red: 0.47, green: 0.92, blue: 0.83)
 private let secondary = Color(red: 0.63, green: 0.69, blue: 0.79)
 
 struct ReceiverView: View {
+    @Environment(\.appLanguage) private var language
+    @Binding var languagePreference: AppLanguagePreference
     @StateObject private var model = ReceiverModel()
     @StateObject private var benchmark = BenchmarkModel()
     @State private var showBenchmark = false
@@ -39,18 +46,24 @@ struct ReceiverView: View {
                     output.frame(maxWidth: .infinity)
                 }
                 HStack {
-                    Text("Switch → 蓝牙 → 树莓派 → SSH → Core Audio")
+                    Text(language.text("route"))
                         .foregroundStyle(secondary)
                     Spacer()
+                    Picker(language.text("language.title"), selection: $languagePreference) {
+                        Text(language.text("language.system")).tag(AppLanguagePreference.system)
+                        Text("English").tag(AppLanguagePreference.english)
+                        Text("简体中文").tag(AppLanguagePreference.simplifiedChinese)
+                    }
+                    .fixedSize()
                     Button {
                         showBenchmark = true
                     } label: {
-                        Label("延迟对比", systemImage: "stopwatch")
+                        Label(language.text("benchmark.title"), systemImage: "stopwatch")
                     }
                     .buttonStyle(.link)
                     .tint(mint)
                     .disabled(model.active)
-                    .help("先断开播放，再用麦克风比较 Mac 本地播放器的延迟。")
+                    .help(language.text("benchmark.help"))
                 }
                 .font(.system(size: 12))
             }
@@ -58,7 +71,7 @@ struct ReceiverView: View {
             .frame(maxWidth: 980)
             .frame(maxWidth: .infinity)
         }
-        .frame(minWidth: 680, minHeight: 535)
+        .frame(minWidth: 720, minHeight: 535)
         .background {
             LinearGradient(colors: [Color(red: 0.085, green: 0.12, blue: 0.18), ink],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -96,8 +109,8 @@ struct ReceiverView: View {
             .frame(width: 54, height: 54)
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 5) {
-                Text("Switch 音频").font(.system(size: 29, weight: .semibold))
-                Text("从树莓派接收游戏声音")
+                Text("Switch Pi Audio").font(.system(size: 29, weight: .semibold))
+                Text(language.text("app.subtitle"))
                     .font(.system(size: 13))
                     .foregroundStyle(secondary)
             }
@@ -106,7 +119,7 @@ struct ReceiverView: View {
                 if model.active { model.disconnect() }
                 else { model.connect() }
             } label: {
-                Label(model.active ? "断开" : "连接",
+                Label(model.active ? language.text("connection.disconnect") : language.text("connection.connect"),
                       systemImage: model.active ? "stop.fill" : "play.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .padding(.horizontal, 17)
@@ -123,35 +136,35 @@ struct ReceiverView: View {
 
     private var connection: some View {
         card {
-            sectionTitle("连接", symbol: "network")
-            label("SSH 地址")
+            sectionTitle(language.text("connection.connect"), symbol: "network")
+            label(language.text("connection.ssh"))
             TextField("pi-audio", text: $model.host)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 13, design: .monospaced))
-                .accessibilityLabel("SSH 地址")
+                .accessibilityLabel(language.text("connection.ssh"))
                 .disabled(model.active || model.switchingBackend)
-            label("音频后端")
+            label(language.text("connection.backend"))
             HStack {
-                Picker("音频后端", selection: $model.backend) {
-                    ForEach(InputBackend.allCases, id: \.self) { mode in Text(mode.label).tag(mode) }
+                Picker(language.text("connection.backend"), selection: $model.backend) {
+                    ForEach(InputBackend.allCases, id: \.self) { mode in Text(language.text(mode.labelKey)).tag(mode) }
                 }
                 .labelsHidden()
-                Button(model.switchingBackend ? "正在切换…" : "切换树莓派后端") {
+                Button(model.switchingBackend ? language.text("connection.switching") : language.text("connection.switch_backend")) {
                     Task { await model.changeBackend() }
                 }
-                .help("切换会中断当前蓝牙连接，之后在 Switch 上重新连接。")
+                .help(language.text("connection.switch_help"))
             }
             .disabled(model.active || model.switchingBackend)
             if model.backend == .pulse {
-                TextField("PulseAudio 输入 · 留空自动识别", text: $model.source)
+                TextField(language.text("connection.source_hint"), text: $model.source)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 12, design: .monospaced))
-                    .accessibilityLabel("PulseAudio 输入名称")
+                    .accessibilityLabel(language.text("connection.source"))
                     .disabled(model.active || model.switchingBackend)
             }
             HStack(spacing: 6) {
                 Image(systemName: "info.circle")
-                Text(model.backendMessage.isEmpty ? "先在 Switch 上连接 Switch-Pi-Audio。" : model.backendMessage)
+                Text(model.backendMessage?.text(in: language) ?? language.text("connection.hint"))
             }
             .font(.system(size: 11))
             .foregroundStyle(secondary)
@@ -161,21 +174,21 @@ struct ReceiverView: View {
 
     private var output: some View {
         card {
-            sectionTitle("播放", symbol: "speaker.wave.2")
+            sectionTitle(language.text("playback.title"), symbol: "speaker.wave.2")
             HStack {
-                label("输出设备")
+                label(language.text("playback.device"))
                 Spacer()
                 Button { model.refreshOutputs() } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.borderless)
                     .foregroundStyle(secondary)
-                    .help("刷新输出设备")
-                    .accessibilityLabel("刷新输出设备")
+                    .help(language.text("playback.refresh"))
+                    .accessibilityLabel(language.text("playback.refresh"))
                     .disabled(model.active)
             }
-            Picker("输出设备", selection: $model.outputID) {
-                if model.outputs.isEmpty { Text("无可用设备").tag("") }
+            Picker(language.text("playback.device"), selection: $model.outputID) {
+                if model.outputs.isEmpty { Text(language.text("playback.no_device")).tag("") }
                 ForEach(model.outputs) { device in
-                    Text(device.id == "BuiltInSpeakerDevice" ? "MacBook 内置扬声器" : device.name)
+                    Text(device.id == "BuiltInSpeakerDevice" ? language.text("playback.speaker") : device.name)
                         .tag(device.id)
                 }
             }
@@ -183,15 +196,15 @@ struct ReceiverView: View {
             .disabled(model.active)
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    label("目标缓冲")
-                    Picker("目标缓冲", selection: $model.bufferMs) {
+                    label(language.text("playback.buffer"))
+                    Picker(language.text("playback.buffer"), selection: $model.bufferMs) {
                         ForEach([40, 60, 80, 120], id: \.self) { Text("\($0) ms").tag($0) }
                     }
                     .labelsHidden()
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    label("播放块长")
-                    Picker("播放块长", selection: $model.blockMs) {
+                    label(language.text("playback.block"))
+                    Picker(language.text("playback.block"), selection: $model.blockMs) {
                         ForEach([10, 15, 20], id: \.self) { Text("\($0) ms").tag($0) }
                     }
                     .labelsHidden()
@@ -203,7 +216,7 @@ struct ReceiverView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(secondary)
                     .accessibilityHidden(true)
-                Slider(value: $model.volume, in: 0...1).accessibilityLabel("播放音量")
+                Slider(value: $model.volume, in: 0...1).accessibilityLabel(language.text("playback.volume"))
                 Text("\(Int(model.volume * 100))%")
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(secondary)
@@ -216,25 +229,25 @@ struct ReceiverView: View {
         card {
             HStack(spacing: 8) {
                 Circle().fill(statusColor).frame(width: 7, height: 7).accessibilityHidden(true)
-                Text(model.phase.label).font(.system(size: 14, weight: .semibold))
+                Text(language.text(model.phase.labelKey)).font(.system(size: 14, weight: .semibold))
                 Spacer()
-                Text(model.backend == .bluez ? "48 kHz · 双声道 · SBC 经 SSH" : "48 kHz · 双声道 · PCM 经 SSH")
+                Text(model.backend == .bluez ? language.text("stream.sbc") : language.text("stream.pcm"))
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(secondary)
             }
-            if !model.message.isEmpty {
-                Text(model.message)
+            if let message = model.message {
+                Text(message.text(in: language))
                     .font(.system(size: 12))
                     .foregroundStyle(Color.orange.opacity(0.9))
                     .textSelection(.enabled)
             }
             HStack(alignment: .center, spacing: 12) {
-                metric("Mac 排队", model.metrics.map { "\(Int($0.appBufferMs.rounded())) ms" } ?? "—")
-                    .help("音频在 Mac 应用和 Audio Queue 中的排队量，不含 Switch 与蓝牙段。")
-                metric("缓冲不足", model.metrics.map { "\($0.underruns) 次" } ?? "—")
-                metric("丢弃旧音频", model.metrics.map { "\(Int(Double($0.droppedFrames) / 48)) ms" } ?? "—")
+                metric(language.text("stream.queue"), model.metrics.map { "\(Int($0.appBufferMs.rounded())) ms" } ?? "—")
+                    .help(language.text("stream.queue_help"))
+                metric(language.text("stream.underruns"), model.metrics.map { language.text("stream.underrun_count", Int64($0.underruns)) } ?? "—")
+                metric(language.text("stream.drops"), model.metrics.map { "\(Int(Double($0.droppedFrames) / 48)) ms" } ?? "—")
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("输出电平").font(.system(size: 11, weight: .medium)).foregroundStyle(secondary)
+                    Text(language.text("stream.level")).font(.system(size: 11, weight: .medium)).foregroundStyle(secondary)
                     HStack(spacing: 3) {
                         let level = model.metrics.map { min(1, max(0, (20 * log10(max(0.001, $0.level)) + 60) / 60)) } ?? 0
                         ForEach(0..<15) { index in

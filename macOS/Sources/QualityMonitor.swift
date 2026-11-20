@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct QualityMonitor: View {
+    @Environment(\.appLanguage) private var language
     let points: [QualityPoint]
     let active: Bool
     let targetBuffer: Int
@@ -20,13 +21,13 @@ struct QualityMonitor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center) {
-                Label("实时音频监控", systemImage: "waveform.path.ecg")
+                Label(language.text("monitor.title"), systemImage: "waveform.path.ecg")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                 Spacer()
-                Picker("监控指标", selection: $metric) {
+                Picker(language.text("monitor.metric"), selection: $metric) {
                     ForEach(QualityMetric.allCases, id: \.self) { item in
-                        Text(item.title).tag(item)
+                        Text(language.text(item.titleKey)).tag(item)
                     }
                 }
                 .labelsHidden()
@@ -40,19 +41,19 @@ struct QualityMonitor: View {
                     .font(.system(size: 25, weight: .semibold, design: .monospaced))
                     .foregroundStyle(metric.color)
                     .contentTransition(.numericText())
-                    .accessibilityLabel("\(metric.title) \(shown.flatMap { metric.value($0) }.map { metric.valueLabel($0) } ?? "暂无数据") \(metric.unit)")
+                    .accessibilityLabel("\(language.text(metric.titleKey)) \(shown.flatMap { metric.value($0) }.map { metric.valueLabel($0) } ?? language.text("monitor.no_data")) \(metric.unit)")
                 Text(metric.unit).foregroundStyle(.secondary).font(.system(size: 12))
                     .accessibilityHidden(true)
                 if let picked {
-                    Text(String(format: "%.1f 秒前", max(0, anchor - picked.time)))
+                    Text(language.text("monitor.ago", max(0, anchor - picked.time)))
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .padding(.leading, 3)
                 }
                 Spacer()
                 HStack(spacing: 12) {
-                    eventKey("缓冲不足", color: .orange)
-                    eventKey("丢弃旧音频", color: Color(red: 0.97, green: 0.42, blue: 0.58))
+                    eventKey(language.text("stream.underruns"), color: .orange)
+                    eventKey(language.text("stream.drops"), color: Color(red: 0.97, green: 0.42, blue: 0.58))
                 }
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -63,7 +64,7 @@ struct QualityMonitor: View {
                 .frame(height: 143)
                 .overlay {
                     if points.isEmpty {
-                        Text(active ? "正在等待音频数据…" : "连接后开始采样")
+                        Text(active ? language.text("monitor.waiting") : language.text("monitor.connect"))
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 12)
@@ -72,17 +73,17 @@ struct QualityMonitor: View {
                             .allowsHitTesting(false)
                     }
                 }
-                .accessibilityLabel("最近 60 秒\(metric.title)曲线")
+                .accessibilityLabel(language.text("monitor.chart", language.text(metric.titleKey)))
 
             HStack {
                 if let picked, picked.underruns > 0 || picked.droppedFrames > 0 {
-                    Text("这个采样点：缓冲不足 \(picked.underruns) 次，丢弃 \(Int(picked.droppedMs.rounded())) ms")
+                    Text(language.text("monitor.sample", Int64(picked.underruns), Int64(picked.droppedMs.rounded())))
                         .foregroundStyle(.orange)
                 } else {
-                    Text(metric.note(backend: backend))
+                    Text(metric.note(backend: backend, language: language))
                 }
                 Spacer()
-                Text(active ? "每 0.25 秒更新" : (points.isEmpty ? "最近 60 秒" : "已暂停 · 保留最后记录"))
+                Text(active ? language.text("monitor.update") : (points.isEmpty ? language.text("monitor.window") : language.text("monitor.paused")))
                     .monospacedDigit()
             }
             .font(.system(size: 11))
@@ -118,7 +119,7 @@ struct QualityMonitor: View {
                 let edge = x(tick)
                 context.stroke(line(CGPoint(x: edge, y: rect.minY), CGPoint(x: edge, y: rect.maxY)),
                                with: .color(.white.opacity(0.075)), lineWidth: 1)
-                let label = tick == 0 ? "现在" : "\(Int(-tick)) 秒前"
+                let label = tick == 0 ? language.text("monitor.now") : language.text("monitor.tick_ago", Int64(-tick))
                 let align: UnitPoint = tick == 0 ? .topTrailing : (tick == -60 ? .topLeading : .top)
                 context.draw(Text(label).font(.system(size: 10)).foregroundStyle(.secondary),
                              at: CGPoint(x: edge, y: rect.maxY + 5), anchor: align)
@@ -245,11 +246,11 @@ private struct MonitorLegendStyle: LabelStyle {
 private enum QualityMetric: CaseIterable {
     case receive, buffer, level
 
-    var title: String {
+    var titleKey: String {
         switch self {
-        case .receive: "接收速率"
-        case .buffer: "Mac 缓冲"
-        case .level: "音频电平"
+        case .receive: "monitor.receive"
+        case .buffer: "monitor.buffer"
+        case .level: "monitor.level"
         }
     }
 
@@ -261,11 +262,11 @@ private enum QualityMetric: CaseIterable {
         }
     }
 
-    func note(backend: InputBackend) -> String {
+    func note(backend: InputBackend, language: AppLanguage) -> String {
         switch self {
-        case .receive: "SSH 收到的 \(backend == .bluez ? "SBC" : "PCM") 数据率 · 约 1 秒滑动平均"
-        case .buffer: "Mac 端排队量 · 虚线为目标缓冲"
-        case .level: "PCM 峰值电平 · 音量调节前"
+        case .receive: language.text("monitor.receive_note", backend == .bluez ? "SBC" : "PCM")
+        case .buffer: language.text("monitor.buffer_note")
+        case .level: language.text("monitor.level_note")
         }
     }
 

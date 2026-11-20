@@ -17,7 +17,7 @@ Both modes use the same Core Audio player. The monitor shows the last 60 seconds
 
 ## Requirements
 
-- Apple Silicon Mac with macOS 14 or later. The current UI is in Simplified Chinese.
+- Apple Silicon Mac with macOS 14 or later.
 - A Raspberry Pi 4B with an ARM64 OpenWrt-family image and a working onboard Bluetooth controller. The tested image was ImmortalWrt 24.10.1 (`bcm27xx/bcm2711`).
 - A Switch with Bluetooth audio output. The two backends were tested on Nintendo Switch 2.
 - An SSH alias or `user@host` reachable from the Mac. This OpenWrt setup uses root and key-based SSH. It uses a local Unix socket and the existing SSH connection for the audio stream.
@@ -30,7 +30,7 @@ Both modes use the same Core Audio player. The monitor shows the last 60 seconds
    git clone https://github.com/Little-King2022/switch-pi-audio.git
    cd switch-pi-audio
    ./macOS/build.sh
-   open "macOS/build/Switch 音频.app"
+   open "macOS/build/Switch Pi Audio.app"
    ```
 
 2. Build and install the Pi services using the [OpenWrt setup guide](docs/openwrt.md). Verify that an SSH command succeeds without an interactive prompt before connecting in the app.
@@ -40,11 +40,17 @@ Both modes use the same Core Audio player. The monitor shows the last 60 seconds
    ```
 
 3. On the Switch, open **System Settings → Bluetooth Audio** and connect to **Switch-Pi-Audio**. Start a game with audio.
-4. In the macOS app, enter the same SSH alias in **SSH 地址**, select the backend and output, and click **连接** (Connect). Leave the PulseAudio source field blank for automatic selection when one Bluetooth input is connected.
+4. In the macOS app, enter the same SSH alias in **SSH address**, select the backend and output, and click **Connect**. Leave the PulseAudio source field blank for automatic selection when one Bluetooth input is connected.
+
+### Choose the app language
+
+The app follows the first supported language in your macOS preferred-language list: English or Simplified Chinese. If neither is listed, it uses English. Use **Language** in the footer to choose **English**, **简体中文**, or **System**. The choice applies immediately, without disconnecting audio, and is remembered for the next launch. The app bundle and window always use the English name `Switch Pi Audio`.
+
+The build produces a locally ad-hoc-signed app, not a notarized installer. After rebuilding, launch the new `Switch Pi Audio.app`, not an older copy with a Chinese filename.
 
 ### Switch or restore a backend
 
-Disconnect the app, select the backend under **音频后端**, and click **切换树莓派后端**. Reconnect the Bluetooth device on the Switch, then connect in the app again. You can also switch from a terminal.
+Disconnect the app, select the backend under **Audio backend**, and click **Switch Pi backend**. Reconnect the Bluetooth device on the Switch, then connect in the app again. You can also switch from a terminal.
 
 ```sh
 ssh pi-audio /usr/libexec/switch-audio-backend bluez
@@ -52,6 +58,12 @@ ssh pi-audio /usr/libexec/switch-audio-backend pulse
 ```
 
 PulseAudio starts on reboot. The BlueZ experiment is enabled on demand. If BlueZ fails to register when switching, the selector attempts to restore PulseAudio.
+
+### Troubleshooting
+
+- **SSH fails:** Confirm the same alias works with `BatchMode=yes`; the app cannot answer a password or host-key prompt.
+- **Connected, but silent:** Confirm the Switch is playing through `Switch-Pi-Audio` and the Mac has the desired output selected. If PulseAudio has more than one Bluetooth source, specify the full source name.
+- **Buffer underruns:** Try 80 or 120 ms before reducing the target buffer. The Mac queue metric is not the end-to-end latency.
 
 ## Source and contributions
 

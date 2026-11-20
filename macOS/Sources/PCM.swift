@@ -112,7 +112,7 @@ struct PlaybackSample {
     let underruns: Int
     let droppedFrames: Int
     let level: Double
-    let error: String?
+    let error: AppMessage?
 }
 
 final class PCMPlayer: @unchecked Sendable {
@@ -133,7 +133,7 @@ final class PCMPlayer: @unchecked Sendable {
     private var underruns = 0
     private var droppedFrames = 0
     private var level: Double = 0
-    private var error: String?
+    private var error: AppMessage?
 
     init(device: OutputDevice, bufferMs: Int, blockMs: Int, volume: Float) throws {
         let block = min(max(blockMs, 10), 20)
@@ -145,18 +145,18 @@ final class PCMPlayer: @unchecked Sendable {
         var result: AudioQueueRef?
         try check(AudioQueueNewOutputWithDispatchQueue(&result, &format, 0, callbackQueue) { [weak self] _, buffer in
             self?.completed(buffer)
-        }, "创建输出队列")
-        guard let result else { throw PlayerError("无法创建 Core Audio 队列") }
+        }, "audio.create")
+        guard let result else { throw PlayerError(AppMessage("error.audio_create")) }
         queue = result
         do {
-            try check(setQueueDevice(result, uid: device.id), "选择输出设备")
+            try check(setQueueDevice(result, uid: device.id), "audio.select")
             for _ in 0..<bufferCount {
                 var buffer: AudioQueueBufferRef?
-                try check(AudioQueueAllocateBuffer(result, UInt32(blockBytes), &buffer), "分配播放缓冲")
-                guard let buffer else { throw PlayerError("无法分配播放缓冲") }
+                try check(AudioQueueAllocateBuffer(result, UInt32(blockBytes), &buffer), "audio.allocate")
+                guard let buffer else { throw PlayerError(AppMessage("error.audio_allocate")) }
                 buffers.append(buffer)
             }
-            try check(AudioQueueSetParameter(result, kAudioQueueParam_Volume, volume), "设置音量")
+            try check(AudioQueueSetParameter(result, kAudioQueueParam_Volume, volume), "audio.volume")
         } catch {
             close()
             throw error
@@ -181,7 +181,7 @@ final class PCMPlayer: @unchecked Sendable {
         guard error == nil else { return }
         let status = AudioQueueStart(queue, nil)
         if status == noErr { started = true }
-        else { error = "Core Audio 无法启动（\(status)）" }
+        else { error = AppMessage("error.audio_start", .integer(Int64(status))) }
     }
 
     func setVolume(_ volume: Float) {
@@ -218,7 +218,7 @@ final class PCMPlayer: @unchecked Sendable {
         buffer.pointee.mAudioDataByteSize = UInt32(blockBytes)
         let status = AudioQueueEnqueueBuffer(queue, buffer, 0, nil)
         if status == noErr { sentFrames += Int64(blockBytes / PCM.frameBytes) }
-        else { error = "Core Audio 无法提交音频（\(status)）" }
+        else { error = AppMessage("error.audio_enqueue", .integer(Int64(status))) }
     }
 
     func sample() -> PlaybackSample {
@@ -250,11 +250,6 @@ final class PCMPlayer: @unchecked Sendable {
     deinit { close() }
 }
 
-struct PlayerError: LocalizedError {
-    let errorDescription: String?
-    init(_ text: String) { errorDescription = text }
-}
-
 func setQueueDevice(_ queue: AudioQueueRef, uid: String) -> OSStatus {
     let value = uid as CFString
     var reference = Unmanaged.passUnretained(value)
@@ -267,5 +262,5 @@ func setQueueDevice(_ queue: AudioQueueRef, uid: String) -> OSStatus {
 }
 
 private func check(_ status: OSStatus, _ operation: String) throws {
-    if status != noErr { throw PlayerError("\(operation)失败（\(status)）") }
+    if status != noErr { throw PlayerError(AppMessage("error.audio_operation", .label(operation), .integer(Int64(status)))) }
 }

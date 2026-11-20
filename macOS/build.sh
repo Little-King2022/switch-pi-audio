@@ -1,9 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")"
-app="${1:-$PWD/build/Switch 音频.app}"
+app="${1:-$PWD/build/Switch Pi Audio.app}"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp Info.plist "$app/Contents/Info.plist"
+cp -R Resources/*.lproj "$app/Contents/Resources/"
 icon_temp=$(mktemp -d)
 trap 'rm -r "$icon_temp"' EXIT
 objects=()

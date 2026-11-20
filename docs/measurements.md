@@ -1,5 +1,7 @@
 # Playback and latency measurements
 
+[简体中文](measurements.zh-CN.md) · [Project home](../README.md)
+
 This is a prototype result from a Switch 2, a Pi 4B on ImmortalWrt 24.10.1, and an Apple Silicon Mac using its internal speakers.
 
 ![A/B monitoring curves for PulseAudio and BlueZ direct](backend-comparison.png)
@@ -25,4 +27,4 @@ python3 benchmarks/measure-mac.py pulse --host pi-audio
 python3 benchmarks/measure-mac.py bluez --host pi-audio
 ```
 
-Switch to the matching backend and reconnect the console before each run. The separate “延迟对比” feature in the Mac app uses local test tones and the microphone to compare two Mac playback methods.
+Switch to the matching backend and reconnect the console before each run. The separate **Latency Comparison** feature in the Mac app uses local test tones and the microphone to compare two Mac playback methods.

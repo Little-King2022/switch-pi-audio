@@ -1,5 +1,7 @@
 # Install on OpenWrt or ImmortalWrt
 
+[简体中文](openwrt.zh-CN.md) · [Project home](../README.md)
+
 These steps are based on a Raspberry Pi 4B running the 64-bit ImmortalWrt 24.10.1 `bcm27xx/bcm2711` image. The direct backend expects `hci0`. Kernel modules and package names must match your installed firmware and feeds. Run device-side commands as root.
 
 ## 1. Confirm the onboard radio
