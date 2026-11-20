@@ -1,0 +1,25 @@
+#!/bin/sh /etc/rc.common
+START=99
+STOP=60
+USE_PROCD=1
+
+start_service() {
+    local name adapter peer
+    config_load switch-audio
+    config_get name receiver name Switch-Pi-Audio
+    config_get adapter receiver adapter hci0
+    config_get peer receiver peer
+    [ -n "$peer" ] || return 1
+
+    procd_open_instance
+    procd_set_param command /usr/libexec/switch-audio-discovery -name "$name" -adapter "$adapter" -peer "$peer"
+    procd_set_param file /etc/config/switch-audio
+    procd_set_param respawn 3600 5 0
+    procd_set_param stderr 1
+    procd_set_param term_timeout 5
+    procd_close_instance
+}
+
+service_triggers() {
+    procd_add_reload_trigger switch-audio
+}

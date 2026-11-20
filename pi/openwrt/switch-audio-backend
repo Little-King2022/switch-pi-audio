@@ -1,0 +1,87 @@
+#!/bin/sh
+set -eu
+export PULSE_SERVER=unix:/var/run/pulse/native
+service=/etc/init.d/switch-audio-sbc
+pulse=/etc/init.d/pulseaudio
+socket=/var/run/switch-audio-sbc.sock
+exec 9>/var/run/switch-audio-backend.lock
+flock -x 9
+
+pulse_status() {
+	pactl list short modules | awk '$2=="module-bluetooth-discover" {print $1; exit}'
+}
+
+direct_status() {
+	"$service" running 2>/dev/null && [ -S "$socket" ]
+}
+
+restore_pulse() {
+	if direct_status; then disconnect_peer; fi
+	"$service" stop 9>&- >/dev/null 2>&1 || true
+	tries=0
+	while "$service" running 2>/dev/null; do
+		tries=$((tries + 1))
+		[ "$tries" -lt 8 ] || return 1
+		sleep 1
+	done
+	rm -f "$socket"
+	if ! "$pulse" running 2>/dev/null; then "$pulse" start 9>&- >/dev/null; fi
+	for attempt in 1 2 3 4 5 6 7 8; do
+		if modules="$(pactl list short modules 2>/dev/null)"; then
+			if printf '%s\n' "$modules" | grep -q 'module-bluetooth-discover'; then return 0; fi
+			pactl load-module module-bluetooth-discover >/dev/null
+			return $?
+		fi
+		sleep 1
+	done
+	return 1
+}
+
+disconnect_peer() {
+	peer="$(uci -q get switch-audio.receiver.peer || true)"
+	[ -n "$peer" ] || return 0
+	if bluetoothctl info "$peer" | grep -q 'Connected: yes'; then
+		bluetoothctl disconnect "$peer" >/dev/null
+	fi
+}
+
+case "${1:-status}" in
+	status)
+		if direct_status; then
+			echo bluez
+		elif [ -n "$(pulse_status 2>/dev/null)" ]; then
+			echo pulse
+		else
+			echo unavailable
+			exit 1
+		fi
+		;;
+	bluez)
+		if direct_status; then echo bluez; exit 0; fi
+		disconnect_peer
+		if "$pulse" running 2>/dev/null; then
+			"$pulse" stop 9>&- >/dev/null
+			for attempt in 1 2 3 4 5 6 7 8; do
+				if ! "$pulse" running 2>/dev/null && ! pactl info >/dev/null 2>&1; then break; fi
+				sleep 1
+			done
+		fi
+		if "$service" start 9>&- >/dev/null; then
+			for attempt in 1 2 3 4 5 6 7 8; do
+				if direct_status; then echo bluez; exit 0; fi
+				sleep 1
+			done
+		fi
+		restore_pulse
+		echo 'BlueZ endpoint failed; restored PulseAudio.' >&2
+		exit 1
+		;;
+	pulse)
+		restore_pulse
+		echo pulse
+		;;
+	*)
+		echo 'Usage: switch-audio-backend [status|pulse|bluez]' >&2
+		exit 2
+		;;
+esac

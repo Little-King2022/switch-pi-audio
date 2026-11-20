@@ -1,0 +1,5 @@
+config receiver 'receiver'
+    option name 'Switch-Pi-Audio'
+    option adapter 'hci0'
+    # Replace with your console's Bluetooth address.
+    option peer 'XX:XX:XX:XX:XX:XX'

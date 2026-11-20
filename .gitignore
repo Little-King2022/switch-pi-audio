@@ -1,0 +1,10 @@
+.DS_Store
+__pycache__/
+*.pyc
+/build/
+/macOS/build/
+/pi/build/
+*.app/
+*.csv
+*.zip
+*.hcd

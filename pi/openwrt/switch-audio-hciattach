@@ -1,0 +1,20 @@
+#!/bin/sh
+set -u
+tty=$1
+child=
+stop() {
+    if [ -n "$child" ]; then
+        kill -TERM "$child" 2>/dev/null || :
+        wait "$child" 2>/dev/null || :
+    fi
+    exit 0
+}
+trap stop TERM INT
+/usr/bin/hciattach -n -t 6 "$tty" bcm43xx 3000000 flow - &
+child=$!
+if wait "$child"; then
+    exit 0
+fi
+child=
+# After a prior attachment, the radio may still be at its operational baud rate.
+exec /usr/bin/hciattach -n -t 8 -s 3000000 "$tty" bcm43xx 3000000 flow -
